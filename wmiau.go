@@ -1054,6 +1054,14 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postmap["type"] = "ConnectFailure"
 		dowebhook = 1
 		log.Error().Str("reason", fmt.Sprintf("%+v", evt)).Msg("Failed to connect to Whatsapp")
+	case *events.GroupInfo:
+		postmap["type"] = "GroupInfo"
+		dowebhook = 1
+		log.Info().Str("group", evt.JID.String()).Msg("Group info changed")
+	case *events.JoinedGroup:
+		postmap["type"] = "JoinedGroup"
+		dowebhook = 1
+		log.Info().Str("group", evt.JID.String()).Msg("Joined group")
 	default:
 		log.Warn().Str("event", fmt.Sprintf("%+v", evt)).Msg("Unhandled event")
 	}
