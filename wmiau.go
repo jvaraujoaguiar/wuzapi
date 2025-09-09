@@ -693,18 +693,21 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				}
 
 				// Convert the image to base64 if needed
-				if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
-					base64String, mimeType, err := fileToBase64(tmpPath)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to convert image to base64")
-						return
-					}
+				// Commented out to avoid sending base64 in webhooks
+				/*
+					if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
+						base64String, mimeType, err := fileToBase64(tmpPath)
+						if err != nil {
+							log.Error().Err(err).Msg("Failed to convert image to base64")
+							return
+						}
 
-					// Add the base64 string and other details to the postmap
-					postmap["base64"] = base64String
-					postmap["mimeType"] = mimeType
-					postmap["fileName"] = filepath.Base(tmpPath)
-				}
+						// Add the base64 string and other details to the postmap
+						postmap["base64"] = base64String
+						postmap["mimeType"] = mimeType
+						postmap["fileName"] = filepath.Base(tmpPath)
+					}
+				*/
 
 				// Log the successful conversion
 				log.Info().Str("path", tmpPath).Msg("Image processed")
@@ -781,18 +784,21 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				}
 
 				// Convert the audio to base64 if needed
-				if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
-					base64String, mimeType, err := fileToBase64(tmpPath)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to convert audio to base64")
-						return
-					}
+				// Commented out to avoid sending base64 in webhooks
+				/*
+					if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
+						base64String, mimeType, err := fileToBase64(tmpPath)
+						if err != nil {
+							log.Error().Err(err).Msg("Failed to convert audio to base64")
+							return
+						}
 
-					// Add the base64 string and other details to the postmap
-					postmap["base64"] = base64String
-					postmap["mimeType"] = mimeType
-					postmap["fileName"] = filepath.Base(tmpPath)
-				}
+						// Add the base64 string and other details to the postmap
+						postmap["base64"] = base64String
+						postmap["mimeType"] = mimeType
+						postmap["fileName"] = filepath.Base(tmpPath)
+					}
+				*/
 
 				// Log the successful conversion
 				log.Info().Str("path", tmpPath).Msg("Audio processed")
@@ -874,18 +880,21 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				}
 
 				// Convert the document to base64 if needed
-				if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
-					base64String, mimeType, err := fileToBase64(tmpPath)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to convert document to base64")
-						return
-					}
+				// Commented out to avoid sending base64 in webhooks
+				/*
+					if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
+						base64String, mimeType, err := fileToBase64(tmpPath)
+						if err != nil {
+							log.Error().Err(err).Msg("Failed to convert document to base64")
+							return
+						}
 
-					// Add the base64 string and other details to the postmap
-					postmap["base64"] = base64String
-					postmap["mimeType"] = mimeType
-					postmap["fileName"] = filepath.Base(tmpPath)
-				}
+						// Add the base64 string and other details to the postmap
+						postmap["base64"] = base64String
+						postmap["mimeType"] = mimeType
+						postmap["fileName"] = filepath.Base(tmpPath)
+					}
+				*/
 
 				// Log the successful conversion
 				log.Info().Str("path", tmpPath).Msg("Document processed")
@@ -956,18 +965,21 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				}
 
 				// Convert the video to base64 if needed
-				if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
-					base64String, mimeType, err := fileToBase64(tmpPath)
-					if err != nil {
-						log.Error().Err(err).Msg("Failed to convert video to base64")
-						return
-					}
+				// Commented out to avoid sending base64 in webhooks
+				/*
+					if s3Config.MediaDelivery == "base64" || s3Config.MediaDelivery == "both" {
+						base64String, mimeType, err := fileToBase64(tmpPath)
+						if err != nil {
+							log.Error().Err(err).Msg("Failed to convert video to base64")
+							return
+						}
 
-					// Add the base64 string and other details to the postmap
-					postmap["base64"] = base64String
-					postmap["mimeType"] = mimeType
-					postmap["fileName"] = filepath.Base(tmpPath)
-				}
+						// Add the base64 string and other details to the postmap
+						postmap["base64"] = base64String
+						postmap["mimeType"] = mimeType
+						postmap["fileName"] = filepath.Base(tmpPath)
+					}
+				*/
 
 				// Log the successful conversion
 				log.Info().Str("path", tmpPath).Msg("Video processed")
