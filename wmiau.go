@@ -994,6 +994,63 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			}
 		}
 
+		// Extract message text content
+		var messageText string
+		if conv := evt.Message.GetConversation(); conv != "" {
+			messageText = conv
+		} else if ext := evt.Message.GetExtendedTextMessage(); ext != nil && ext.GetText() != "" {
+			messageText = ext.GetText()
+		}
+
+		if messageText != "" {
+			postmap["body"] = messageText
+		}
+
+		// Add basic message info
+		postmap["from"] = evt.Info.Sender.String()
+		postmap["to"] = evt.Info.Chat.String()
+		postmap["id"] = evt.Info.ID
+		postmap["timestamp"] = evt.Info.Timestamp.Unix()
+
+		// Check if message is from a group and add group metadata
+		if evt.Info.IsGroup {
+			groupJID := evt.Info.Chat
+			groupInfo, err := mycli.WAClient.GetGroupInfo(groupJID)
+			if err != nil {
+				log.Warn().Err(err).Str("groupJID", groupJID.String()).Msg("Failed to get group info for webhook")
+			} else {
+				// Build participants array with detailed info
+				participants := make([]map[string]interface{}, 0, len(groupInfo.Participants))
+				for _, participant := range groupInfo.Participants {
+					participantData := map[string]interface{}{
+						"id":           participant.JID.String(),
+						"isAdmin":      participant.IsAdmin,
+						"isSuperAdmin": participant.IsSuperAdmin,
+						"phoneNumber":  participant.JID,
+					}
+
+					// Add LID if available
+					if !participant.LID.IsEmpty() {
+						participantData["lid"] = participant.LID.String()
+					}
+
+					participants = append(participants, participantData)
+				}
+
+				groupMetadata := map[string]interface{}{
+					"id":           groupInfo.JID.String(),
+					"subject":      groupInfo.Name,
+					"subjectOwner": groupInfo.OwnerJID.String(),
+					"participants": participants,
+					"size":         len(groupInfo.Participants),
+					"isAnnounce":   groupInfo.IsAnnounce,
+					"isLocked":     groupInfo.IsLocked,
+					"desc":         groupInfo.GroupTopic.Topic,
+				}
+				postmap["groupMetadata"] = groupMetadata
+			}
+		}
+
 	case *events.Receipt:
 		postmap["type"] = "ReadReceipt"
 		dowebhook = 1
