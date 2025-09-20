@@ -2607,10 +2607,10 @@ func (s *server) GetAvatar() http.HandlerFunc {
 					Type: "default",
 				}
 				responseJson, _ := json.Marshal(response)
-				
+
 				// Cache the default response for a shorter time (5 minutes)
 				avatarCache.Set(cacheKey, string(responseJson), 5*time.Minute)
-				
+
 				s.Respond(w, r, http.StatusOK, string(responseJson))
 				return
 			}
@@ -2643,7 +2643,7 @@ func (s *server) GetAvatar() http.HandlerFunc {
 
 		case err := <-errorChan:
 			log.Warn().Err(err).Str("phone", t.Phone).Msg("Failed to get avatar, returning default")
-			
+
 			// Return default avatar on error
 			response := AvatarResponse{
 				ID:   "default",
@@ -2651,16 +2651,16 @@ func (s *server) GetAvatar() http.HandlerFunc {
 				Type: "default",
 			}
 			responseJson, _ := json.Marshal(response)
-			
+
 			// Cache the default response for a shorter time (5 minutes)
 			avatarCache.Set(cacheKey, string(responseJson), 5*time.Minute)
-			
+
 			s.Respond(w, r, http.StatusOK, string(responseJson))
 			return
 
 		case <-ctx.Done():
 			log.Warn().Str("phone", t.Phone).Msg("Avatar request timeout, returning default")
-			
+
 			// Return default avatar on timeout
 			response := AvatarResponse{
 				ID:   "default",
@@ -2668,10 +2668,10 @@ func (s *server) GetAvatar() http.HandlerFunc {
 				Type: "default",
 			}
 			responseJson, _ := json.Marshal(response)
-			
+
 			// Cache the default response for a shorter time (5 minutes)
 			avatarCache.Set(cacheKey, string(responseJson), 5*time.Minute)
-			
+
 			s.Respond(w, r, http.StatusOK, string(responseJson))
 			return
 		}
