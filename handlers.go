@@ -2523,12 +2523,27 @@ func (s *server) GetAvatar() http.HandlerFunc {
 		Preview bool
 	}
 
+	type AvatarResponse struct {
+		ID   string `json:"id"`
+		URL  string `json:"url"`
+		Type string `json:"type"`
+	}
+
+	const defaultAvatarURL = "https://i.ibb.co/t2m9fFt/88876ba5bb74.jpg"
+
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		txtid := r.Context().Value("userinfo").(Values).Get("Id")
 
 		if clientManager.GetWhatsmeowClient(txtid) == nil {
-			s.Respond(w, r, http.StatusInternalServerError, errors.New("no session"))
+			// Return default avatar if no session
+			response := AvatarResponse{
+				ID:   "default",
+				URL:  defaultAvatarURL,
+				Type: "default",
+			}
+			responseJson, _ := json.Marshal(response)
+			s.Respond(w, r, http.StatusOK, string(responseJson))
 			return
 		}
 
@@ -2551,34 +2566,115 @@ func (s *server) GetAvatar() http.HandlerFunc {
 			return
 		}
 
-		var pic *types.ProfilePictureInfo
-
-		existingID := ""
-		pic, err = clientManager.GetWhatsmeowClient(txtid).GetProfilePictureInfo(jid, &whatsmeow.GetProfilePictureParams{
-			Preview:    t.Preview,
-			ExistingID: existingID,
-		})
-		if err != nil {
-			msg := fmt.Sprintf("failed to get avatar: %v", err)
-			log.Error().Msg(msg)
-			s.Respond(w, r, http.StatusInternalServerError, errors.New(msg))
+		// Check cache first
+		cacheKey := fmt.Sprintf("avatar_%s_%s_%t", txtid, jid.String(), t.Preview)
+		if cachedAvatar, found := avatarCache.Get(cacheKey); found {
+			log.Info().Str("phone", t.Phone).Msg("Avatar found in cache")
+			s.Respond(w, r, http.StatusOK, cachedAvatar.(string))
 			return
 		}
 
-		if pic == nil {
-			s.Respond(w, r, http.StatusInternalServerError, errors.New("no avatar found"))
-			return
-		}
+		// Create context with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-		log.Info().Str("id", pic.ID).Str("url", pic.URL).Msg("Got avatar")
+		// Channel to receive result or timeout
+		resultChan := make(chan *types.ProfilePictureInfo, 1)
+		errorChan := make(chan error, 1)
 
-		responseJson, err := json.Marshal(pic)
-		if err != nil {
-			s.Respond(w, r, http.StatusInternalServerError, err)
-		} else {
+		// Get avatar in goroutine
+		go func() {
+			existingID := ""
+			pic, err := clientManager.GetWhatsmeowClient(txtid).GetProfilePictureInfo(jid, &whatsmeow.GetProfilePictureParams{
+				Preview:    t.Preview,
+				ExistingID: existingID,
+			})
+			if err != nil {
+				errorChan <- err
+				return
+			}
+			resultChan <- pic
+		}()
+
+		// Wait for result or timeout
+		select {
+		case pic := <-resultChan:
+			if pic == nil {
+				// No avatar found, return default
+				response := AvatarResponse{
+					ID:   "default",
+					URL:  defaultAvatarURL,
+					Type: "default",
+				}
+				responseJson, _ := json.Marshal(response)
+				
+				// Cache the default response for a shorter time (5 minutes)
+				avatarCache.Set(cacheKey, string(responseJson), 5*time.Minute)
+				
+				s.Respond(w, r, http.StatusOK, string(responseJson))
+				return
+			}
+
+			log.Info().Str("id", pic.ID).Str("url", pic.URL).Msg("Got avatar")
+
+			response := AvatarResponse{
+				ID:   pic.ID,
+				URL:  pic.URL,
+				Type: "whatsapp",
+			}
+
+			responseJson, err := json.Marshal(response)
+			if err != nil {
+				// Return default if marshal fails
+				defaultResponse := AvatarResponse{
+					ID:   "default",
+					URL:  defaultAvatarURL,
+					Type: "default",
+				}
+				defaultJson, _ := json.Marshal(defaultResponse)
+				s.Respond(w, r, http.StatusOK, string(defaultJson))
+				return
+			}
+
+			// Cache successful response for 1 hour
+			avatarCache.Set(cacheKey, string(responseJson), cache.DefaultExpiration)
 			s.Respond(w, r, http.StatusOK, string(responseJson))
+			return
+
+		case err := <-errorChan:
+			log.Warn().Err(err).Str("phone", t.Phone).Msg("Failed to get avatar, returning default")
+			
+			// Return default avatar on error
+			response := AvatarResponse{
+				ID:   "default",
+				URL:  defaultAvatarURL,
+				Type: "default",
+			}
+			responseJson, _ := json.Marshal(response)
+			
+			// Cache the default response for a shorter time (5 minutes)
+			avatarCache.Set(cacheKey, string(responseJson), 5*time.Minute)
+			
+			s.Respond(w, r, http.StatusOK, string(responseJson))
+			return
+
+		case <-ctx.Done():
+			log.Warn().Str("phone", t.Phone).Msg("Avatar request timeout, returning default")
+			
+			// Return default avatar on timeout
+			response := AvatarResponse{
+				ID:   "default",
+				URL:  defaultAvatarURL,
+				Type: "default",
+			}
+			responseJson, _ := json.Marshal(response)
+			
+			// Cache the default response for a shorter time (5 minutes)
+			avatarCache.Set(cacheKey, string(responseJson), 5*time.Minute)
+			
+			s.Respond(w, r, http.StatusOK, string(responseJson))
+			return
 		}
-		return
 	}
 }
 

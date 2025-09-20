@@ -52,6 +52,7 @@ var (
 	killchannel      = make(map[string](chan bool))
 	userinfocache    = cache.New(5*time.Minute, 10*time.Minute)
 	lastMessageCache = cache.New(24*time.Hour, 24*time.Hour)
+	avatarCache      = cache.New(1*time.Hour, 2*time.Hour)
 )
 
 const version = "1.0.2"
