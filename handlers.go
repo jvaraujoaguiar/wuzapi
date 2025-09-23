@@ -1543,6 +1543,93 @@ type ButtonParams struct {
 	ID          string `json:"buttonID"`
 }
 
+// GenerateMultipleMenuMessage creates an interactive message with multiple menus
+func GenerateMultipleMenuMessage(messageText, title, footer string, menus []MenuParams) *waE2E.InteractiveMessage {
+	// Create MessageVersion
+	msgVersion := int32(1)
+
+	// Create multiple buttons, one for each menu
+	var nativeFlowButtons []*waE2E.InteractiveMessage_NativeFlowMessage_NativeFlowButton
+
+	for _, menu := range menus {
+		// Create menu structure for this specific menu
+		menuStructure := map[string]interface{}{
+			"title": menu.Title, // Use the menu's own title
+			"sections": []map[string]interface{}{
+				{
+					"title": menu.Title,
+					"rows":  make([]map[string]interface{}, 0),
+				},
+			},
+		}
+
+		// Convert buttons to menu rows for this menu
+		for _, button := range menu.Buttons {
+			// Extract description from displayText if it contains parentheses
+			description := ""
+			buttonTitle := button.DisplayText
+			if len(button.DisplayText) > 0 {
+				if start := strings.Index(button.DisplayText, "("); start != -1 {
+					if end := strings.Index(button.DisplayText, ")"); end != -1 && end > start {
+						description = button.DisplayText[start+1 : end]
+						buttonTitle = strings.TrimSpace(button.DisplayText[:start])
+					}
+				}
+			}
+
+			row := map[string]interface{}{
+				"title":       buttonTitle,
+				"description": description,
+				"header":      "",
+				"id":          button.ID,
+			}
+			menuStructure["sections"].([]map[string]interface{})[0]["rows"] = append(
+				menuStructure["sections"].([]map[string]interface{})[0]["rows"].([]map[string]interface{}),
+				row,
+			)
+		}
+
+		// Convert to JSON
+		menuJSON, _ := json.Marshal(menuStructure)
+
+		// Add button for this menu
+		nativeFlowButtons = append(nativeFlowButtons, &waE2E.InteractiveMessage_NativeFlowMessage_NativeFlowButton{
+			Name:             proto.String("single_select"),
+			ButtonParamsJSON: proto.String(string(menuJSON)),
+		})
+	}
+
+	// Create the interactive message
+	InteractiveMessage := &waE2E.InteractiveMessage{
+		Body: &waE2E.InteractiveMessage_Body{
+			Text: proto.String(messageText),
+		},
+		InteractiveMessage: &waE2E.InteractiveMessage_NativeFlowMessage_{
+			NativeFlowMessage: &waE2E.InteractiveMessage_NativeFlowMessage{
+				MessageVersion: &msgVersion,
+				Buttons:        nativeFlowButtons,
+			},
+		},
+	}
+
+	// Add header if title is provided
+	if title != "" {
+		InteractiveMessage.Header = &waE2E.InteractiveMessage_Header{
+			Title:              proto.String(title),
+			HasMediaAttachment: proto.Bool(false),
+		}
+	}
+
+	// Add footer if provided
+	if footer != "" {
+		InteractiveMessage.Footer = &waE2E.InteractiveMessage_Footer{
+			Text: proto.String(footer),
+		}
+	}
+
+	return InteractiveMessage
+}
+
 // GenerateInteractiveMessage creates an interactive message with buttons based on Baileys structure
 func GenerateInteractiveMessage(messageText, title, footer string, buttons []ButtonParams) *waE2E.InteractiveMessage {
 	// Create the menu structure exactly like Baileys
@@ -1776,6 +1863,12 @@ type BinaryNode struct {
 	Content []BinaryNode      `json:"content,omitempty"`
 }
 
+// MenuParams defines the structure for a menu with buttons
+type MenuParams struct {
+	Title   string         `json:"title"`
+	Buttons []ButtonParams `json:"buttons"`
+}
+
 // SendInteractiveMessage sends interactive messages with buttons
 func (s *server) SendInteractiveMessage() http.HandlerFunc {
 	type interactiveMessageStruct struct {
@@ -1783,7 +1876,8 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 		Message         string         `json:"message"`
 		Title           string         `json:"title,omitempty"`
 		Footer          string         `json:"footer,omitempty"`
-		Buttons         []ButtonParams `json:"buttons"`
+		Buttons         []ButtonParams `json:"buttons,omitempty"` // Single menu (backward compatibility)
+		Menus           []MenuParams   `json:"menus,omitempty"`   // Multiple menus
 		ID              string         `json:"id,omitempty"`
 		AdditionalNodes []BinaryNode   `json:"additionalNodes,omitempty"`
 	}
@@ -1815,13 +1909,15 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 			return
 		}
 
-		if len(payload.Buttons) == 0 {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("missing buttons in payload"))
+		// Validate that either Buttons or Menus is provided
+		if len(payload.Buttons) == 0 && len(payload.Menus) == 0 {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("missing buttons or menus in payload"))
 			return
 		}
 
-		if len(payload.Buttons) > 3 {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("maximum 3 buttons allowed"))
+		// Don't allow both Buttons and Menus at the same time to avoid confusion
+		if len(payload.Buttons) > 0 && len(payload.Menus) > 0 {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("use either buttons or menus, not both"))
 			return
 		}
 
@@ -1836,8 +1932,16 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 			msgid = clientManager.GetWhatsmeowClient(txtid).GenerateMessageID()
 		}
 
-		// Generate the interactive message with title and footer
-		interactiveMsg := GenerateInteractiveMessage(payload.Message, payload.Title, payload.Footer, payload.Buttons)
+		var interactiveMsg *waE2E.InteractiveMessage
+
+		// Generate different message types based on input
+		if len(payload.Menus) > 0 {
+			// Multiple menus mode
+			interactiveMsg = GenerateMultipleMenuMessage(payload.Message, payload.Title, payload.Footer, payload.Menus)
+		} else {
+			// Single menu mode (backward compatibility)
+			interactiveMsg = GenerateInteractiveMessage(payload.Message, payload.Title, payload.Footer, payload.Buttons)
+		}
 
 		// Create the message wrapper
 		msg := &waE2E.Message{
@@ -1853,6 +1957,33 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 		if len(payload.AdditionalNodes) > 0 {
 			// Use nodes from request
 			additionalNodes = convertJSONNodesToBinary(payload.AdditionalNodes)
+		} else {
+			// Use default nodes for interactive message support
+			// Based on whatsmeow business profile pattern and Baileys implementation
+			// additionalNodes = []waBinary.Node{
+			// 	{
+			// 		Tag:   "biz",
+			// 		Attrs: waBinary.Attrs{},
+			// 		Content: []waBinary.Node{
+			// 			{
+			// 				Tag: "interactive",
+			// 				Attrs: waBinary.Attrs{
+			// 					"type": "native_flow",
+			// 					"v":    "1",
+			// 				},
+			// 				Content: []waBinary.Node{
+			// 					{
+			// 						Tag: "native_flow",
+			// 						Attrs: waBinary.Attrs{
+			// 							"name": "mixed",
+			// 							"v":    "2",
+			// 						},
+			// 					},
+			// 				},
+			// 			},
+			// 		},
+			// 	},
+			// }
 		}
 
 		// Send the message with additional nodes
