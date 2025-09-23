@@ -1019,6 +1019,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			if err != nil {
 				log.Warn().Err(err).Str("groupJID", groupJID.String()).Msg("Failed to get group info for webhook")
 			} else {
+				log.Warn().Interface("groupJID", groupInfo.Participants).Msg("Got group info for webhook")
 				// Build participants array with detailed info
 				participants := make([]map[string]interface{}, 0, len(groupInfo.Participants))
 				for _, participant := range groupInfo.Participants {
@@ -1026,7 +1027,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 						"id":           participant.JID.String(),
 						"isAdmin":      participant.IsAdmin,
 						"isSuperAdmin": participant.IsSuperAdmin,
-						"phoneNumber":  participant.JID,
+						"phoneNumber":  participant.PhoneNumber,
 					}
 
 					// Add LID if available
@@ -1038,14 +1039,15 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				}
 
 				groupMetadata := map[string]interface{}{
-					"id":           groupInfo.JID.String(),
-					"subject":      groupInfo.Name,
-					"subjectOwner": groupInfo.OwnerJID.String(),
-					"participants": participants,
-					"size":         len(groupInfo.Participants),
-					"isAnnounce":   groupInfo.IsAnnounce,
-					"isLocked":     groupInfo.IsLocked,
-					"desc":         groupInfo.GroupTopic.Topic,
+					"id":             groupInfo.JID.String(),
+					"subject":        groupInfo.Name,
+					"subjectOwner":   groupInfo.OwnerJID.String(),
+					"participants":   participants,
+					"size":           len(groupInfo.Participants),
+					"isAnnounce":     groupInfo.IsAnnounce,
+					"isLocked":       groupInfo.IsLocked,
+					"desc":           groupInfo.GroupTopic.Topic,
+					"addressingMode": groupInfo.AddressingMode,
 				}
 				postmap["groupMetadata"] = groupMetadata
 			}
