@@ -23,6 +23,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/vincent-petithory/dataurl"
 	"go.mau.fi/whatsmeow"
+	waBinary "go.mau.fi/whatsmeow/binary"
 
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -1536,6 +1537,102 @@ func (s *server) SendLocation() http.HandlerFunc {
 	}
 }
 
+// ButtonParams defines the structure for interactive message buttons
+type ButtonParams struct {
+	DisplayText string `json:"displayText"`
+	ID          string `json:"buttonID"`
+}
+
+// GenerateInteractiveMessage creates an interactive message with buttons based on Baileys structure
+func GenerateInteractiveMessage(messageText, title, footer string, buttons []ButtonParams) *waE2E.InteractiveMessage {
+	// Create the menu structure exactly like Baileys
+	sectionTitle := "Menu Signos"
+	if title != "" {
+		sectionTitle = title
+	}
+
+	menuStructure := map[string]interface{}{
+		"title": "Selecione uma opção",
+		"sections": []map[string]interface{}{
+			{
+				"title": sectionTitle,
+				"rows":  make([]map[string]interface{}, 0),
+			},
+		},
+	}
+
+	// Convert buttons to menu rows with description and header fields
+	for _, button := range buttons {
+		// Extract description from displayText if it contains parentheses
+		description := ""
+		title := button.DisplayText
+		if len(button.DisplayText) > 0 {
+			// Try to extract description from format like "♈️Áries (21/03 - 20/04)"
+			if start := strings.Index(button.DisplayText, "("); start != -1 {
+				if end := strings.Index(button.DisplayText, ")"); end != -1 && end > start {
+					description = button.DisplayText[start+1 : end]
+					title = strings.TrimSpace(button.DisplayText[:start])
+				}
+			}
+		}
+
+		row := map[string]interface{}{
+			"title":       title,
+			"description": description,
+			"header":      "",
+			"id":          button.ID,
+		}
+		menuStructure["sections"].([]map[string]interface{})[0]["rows"] = append(
+			menuStructure["sections"].([]map[string]interface{})[0]["rows"].([]map[string]interface{}),
+			row,
+		)
+	}
+
+	// Convert to JSON
+	menuJSON, _ := json.Marshal(menuStructure)
+
+	// Create MessageVersion
+	msgVersion := int32(1)
+
+	// Create single button with "single_select" name as in Baileys
+	nativeFlowButtons := []*waE2E.InteractiveMessage_NativeFlowMessage_NativeFlowButton{
+		{
+			Name:             proto.String("single_select"),
+			ButtonParamsJSON: proto.String(string(menuJSON)),
+		},
+	}
+
+	// Create the interactive message
+	InteractiveMessage := &waE2E.InteractiveMessage{
+		Body: &waE2E.InteractiveMessage_Body{
+			Text: proto.String(messageText),
+		},
+		InteractiveMessage: &waE2E.InteractiveMessage_NativeFlowMessage_{
+			NativeFlowMessage: &waE2E.InteractiveMessage_NativeFlowMessage{
+				MessageVersion: &msgVersion,
+				Buttons:        nativeFlowButtons,
+			},
+		},
+	}
+
+	// Add header if title is provided
+	if title != "" {
+		InteractiveMessage.Header = &waE2E.InteractiveMessage_Header{
+			Title:              proto.String(title),
+			HasMediaAttachment: proto.Bool(false),
+		}
+	}
+
+	// Add footer if provided
+	if footer != "" {
+		InteractiveMessage.Footer = &waE2E.InteractiveMessage_Footer{
+			Text: proto.String(footer),
+		}
+	}
+
+	return InteractiveMessage
+}
+
 // Sends Buttons (not implemented, does not work)
 func (s *server) SendButtons() http.HandlerFunc {
 
@@ -1637,6 +1734,156 @@ func (s *server) SendButtons() http.HandlerFunc {
 			s.Respond(w, r, http.StatusOK, string(responseJson))
 		}
 		return
+	}
+}
+
+// convertJSONNodesToBinary converts JSON nodes to waBinary.Node format
+func convertJSONNodesToBinary(jsonNodes []BinaryNode) []waBinary.Node {
+	var result []waBinary.Node
+
+	for _, jsonNode := range jsonNodes {
+		binaryNode := waBinary.Node{
+			Tag:   jsonNode.Tag,
+			Attrs: waBinary.Attrs{},
+		}
+
+		// Convert attributes
+		for key, value := range jsonNode.Attrs {
+			binaryNode.Attrs[key] = value
+		}
+
+		// Convert content recursively
+		if len(jsonNode.Content) > 0 {
+			binaryNode.Content = convertJSONNodesToBinary(jsonNode.Content)
+		}
+
+		result = append(result, binaryNode)
+	}
+
+	return result
+}
+
+// NodeAttr represents attributes for a binary node
+type NodeAttr struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// BinaryNode represents a binary node structure
+type BinaryNode struct {
+	Tag     string            `json:"tag"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
+	Content []BinaryNode      `json:"content,omitempty"`
+}
+
+// SendInteractiveMessage sends interactive messages with buttons
+func (s *server) SendInteractiveMessage() http.HandlerFunc {
+	type interactiveMessageStruct struct {
+		Phone           string         `json:"phone"`
+		Message         string         `json:"message"`
+		Title           string         `json:"title,omitempty"`
+		Footer          string         `json:"footer,omitempty"`
+		Buttons         []ButtonParams `json:"buttons"`
+		ID              string         `json:"id,omitempty"`
+		AdditionalNodes []BinaryNode   `json:"additionalNodes,omitempty"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		txtid := r.Context().Value("userinfo").(Values).Get("Id")
+
+		if clientManager.GetWhatsmeowClient(txtid) == nil {
+			s.Respond(w, r, http.StatusInternalServerError, errors.New("no session"))
+			return
+		}
+
+		var payload interactiveMessageStruct
+		decoder := json.NewDecoder(r.Body)
+		err := decoder.Decode(&payload)
+		if err != nil {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("could not decode payload"))
+			return
+		}
+
+		// Validate required fields
+		if payload.Phone == "" {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("missing phone in payload"))
+			return
+		}
+
+		if payload.Message == "" {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("missing message in payload"))
+			return
+		}
+
+		if len(payload.Buttons) == 0 {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("missing buttons in payload"))
+			return
+		}
+
+		if len(payload.Buttons) > 3 {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("maximum 3 buttons allowed"))
+			return
+		}
+
+		recipient, ok := parseJID(payload.Phone)
+		if !ok {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("could not parse phone"))
+			return
+		}
+
+		msgid := payload.ID
+		if msgid == "" {
+			msgid = clientManager.GetWhatsmeowClient(txtid).GenerateMessageID()
+		}
+
+		// Generate the interactive message with title and footer
+		interactiveMsg := GenerateInteractiveMessage(payload.Message, payload.Title, payload.Footer, payload.Buttons)
+
+		// Create the message wrapper
+		msg := &waE2E.Message{
+			InteractiveMessage: interactiveMsg,
+		}
+
+		// Log the message structure for debugging
+		log.Info().Str("msgid", msgid).Str("recipient", recipient.String()).Msg("Attempting to send interactive message")
+
+		// Convert JSON nodes to waBinary.Node format
+		var additionalNodes []waBinary.Node
+
+		if len(payload.AdditionalNodes) > 0 {
+			// Use nodes from request
+			additionalNodes = convertJSONNodesToBinary(payload.AdditionalNodes)
+		}
+
+		// Send the message with additional nodes
+		resp, err := clientManager.GetWhatsmeowClient(txtid).SendMessage(
+			context.Background(),
+			recipient,
+			msg,
+			whatsmeow.SendRequestExtra{
+				ID:              msgid,
+				AdditionalNodes: &additionalNodes,
+			},
+		)
+
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("error sending interactive message: %v", err)))
+			return
+		}
+
+		log.Info().Str("timestamp", fmt.Sprintf("%v", resp.Timestamp)).Str("id", msgid).Msg("Interactive message sent")
+		response := map[string]interface{}{
+			"Details":   "Interactive message sent",
+			"Timestamp": resp.Timestamp.Unix(),
+			"Id":        msgid,
+		}
+
+		responseJson, err := json.Marshal(response)
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, err)
+		} else {
+			s.Respond(w, r, http.StatusOK, string(responseJson))
+		}
 	}
 }
 
@@ -2099,7 +2346,7 @@ func (s *server) SendEditMessage() http.HandlerFunc {
 			return
 		}
 
-		log.Info().Str("timestamp", fmt.Sprintf("%d", resp.Timestamp)).Str("id", msgid).Msg("Message edit sent")
+		log.Info().Str("timestamp", fmt.Sprintf("%d", resp.Timestamp.Unix())).Str("id", msgid).Msg("Message edit sent")
 		response := map[string]interface{}{"Details": "Sent", "Timestamp": resp.Timestamp.Unix(), "Id": msgid}
 		responseJson, err := json.Marshal(response)
 		if err != nil {
@@ -3247,7 +3494,7 @@ func (s *server) ListGroups() http.HandlerFunc {
 			return
 		}
 
-		resp, err := clientManager.GetWhatsmeowClient(txtid).GetJoinedGroups()
+		resp, err := clientManager.GetWhatsmeowClient(txtid).GetJoinedGroups(r.Context())
 
 		if err != nil {
 			msg := fmt.Sprintf("failed to get group list: %v", err)
