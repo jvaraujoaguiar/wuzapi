@@ -39,6 +39,33 @@ type MyClient struct {
 	db             *sqlx.DB
 }
 
+// addSessionInfo adds the connected session information to the postmap
+func (mycli *MyClient) addSessionInfo(postmap map[string]interface{}) {
+	if mycli.WAClient.Store.ID != nil {
+		sessionInfo := map[string]interface{}{
+			"jid":    mycli.WAClient.Store.ID.String(),
+			"userID": mycli.userID,
+			"token":  mycli.token,
+			"lid":    mycli.WAClient.Store.LID,
+		}
+
+		// Add device info if available
+		if mycli.WAClient.Store.ID.Device != 0 {
+			sessionInfo["device"] = mycli.WAClient.Store.ID.Device
+		}
+
+		// Add server info
+		sessionInfo["server"] = mycli.WAClient.Store.ID.Server
+
+		// Add pushname if available
+		if mycli.WAClient.Store.PushName != "" {
+			sessionInfo["pushName"] = mycli.WAClient.Store.PushName
+		}
+
+		postmap["Session"] = sessionInfo
+	}
+}
+
 func sendToGlobalWebHook(jsonData []byte, token string, userID string) {
 	jsonDataStr := string(jsonData)
 
@@ -556,6 +583,8 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 	case *events.Connected, *events.PushNameSetting:
 		postmap["type"] = "Connected"
 		dowebhook = 1
+		// Add session info
+		mycli.addSessionInfo(postmap)
 		if len(mycli.WAClient.Store.PushName) == 0 {
 			break
 		}
@@ -1012,6 +1041,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postmap["id"] = evt.Info.ID
 		postmap["timestamp"] = evt.Info.Timestamp.Unix()
 
+		// Add session info (own JID/number)
+		mycli.addSessionInfo(postmap)
+
 		// Check if message is from a group and add group metadata
 		if evt.Info.IsGroup {
 			groupJID := evt.Info.Chat
@@ -1073,6 +1105,8 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			// Discard webhooks for inactive or other delivery types
 			return
 		}
+		// Add session info
+		mycli.addSessionInfo(postmap)
 	case *events.Presence:
 		postmap["type"] = "Presence"
 		dowebhook = 1
@@ -1087,14 +1121,20 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			postmap["state"] = "online"
 			log.Info().Str("from", evt.From.String()).Msg("User is now online")
 		}
+		// Add session info
+		mycli.addSessionInfo(postmap)
 	case *events.HistorySync:
 		postmap["type"] = "HistorySync"
 		dowebhook = 1
+		// Add session info
+		mycli.addSessionInfo(postmap)
 	case *events.AppState:
 		log.Info().Str("index", fmt.Sprintf("%+v", evt.Index)).Str("actionValue", fmt.Sprintf("%+v", evt.SyncActionValue)).Msg("App state event received")
 	case *events.LoggedOut:
 		postmap["type"] = "Logged Out"
 		dowebhook = 1
+		// Add session info (should be available even when logging out)
+		mycli.addSessionInfo(postmap)
 		log.Info().Str("reason", evt.Reason.String()).Msg("Logged out")
 		killchannel[mycli.userID] <- true
 		sqlStmt := `UPDATE users SET connected=0 WHERE id=$1`
@@ -1106,6 +1146,8 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 	case *events.ChatPresence:
 		postmap["type"] = "ChatPresence"
 		dowebhook = 1
+		// Add session info
+		mycli.addSessionInfo(postmap)
 		log.Info().Str("state", fmt.Sprintf("%s", evt.State)).Str("media", fmt.Sprintf("%s", evt.Media)).Str("chat", evt.MessageSource.Chat.String()).Str("sender", evt.MessageSource.Sender.String()).Msg("Chat Presence received")
 	case *events.CallOffer:
 		log.Info().Str("event", fmt.Sprintf("%+v", evt)).Msg("Got call offer")
@@ -1120,18 +1162,26 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 	case *events.Disconnected:
 		postmap["type"] = "Disconnected"
 		dowebhook = 1
+		// Add session info
+		mycli.addSessionInfo(postmap)
 		log.Info().Str("reason", fmt.Sprintf("%+v", evt)).Msg("Disconnected from Whatsapp")
 	case *events.ConnectFailure:
 		postmap["type"] = "ConnectFailure"
 		dowebhook = 1
+		// Add session info
+		mycli.addSessionInfo(postmap)
 		log.Error().Str("reason", fmt.Sprintf("%+v", evt)).Msg("Failed to connect to Whatsapp")
 	case *events.GroupInfo:
 		postmap["type"] = "GroupInfo"
 		dowebhook = 1
+		// Add session info
+		mycli.addSessionInfo(postmap)
 		log.Info().Str("group", evt.JID.String()).Msg("Group info changed")
 	case *events.JoinedGroup:
 		postmap["type"] = "JoinedGroup"
 		dowebhook = 1
+		// Add session info
+		mycli.addSessionInfo(postmap)
 		log.Info().Str("group", evt.JID.String()).Msg("Joined group")
 	default:
 		log.Warn().Str("event", fmt.Sprintf("%+v", evt)).Msg("Unhandled event")
