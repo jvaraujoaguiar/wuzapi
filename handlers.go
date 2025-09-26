@@ -832,6 +832,8 @@ func (s *server) SendAudio() http.HandlerFunc {
 		Audio       string
 		Caption     string
 		Id          string
+		PTT         *bool  `json:"ptt,omitempty"`
+		MimeType    string `json:"mimetype,omitempty"`
 		ContextInfo waE2E.ContextInfo
 	}
 
@@ -880,7 +882,7 @@ func (s *server) SendAudio() http.HandlerFunc {
 		var uploaded whatsmeow.UploadResponse
 		var filedata []byte
 
-		if t.Audio[0:14] == "data:audio/ogg" {
+		if strings.HasPrefix(t.Audio, "data:audio/") {
 			var dataURL, err = dataurl.DecodeString(t.Audio)
 			if err != nil {
 				s.Respond(w, r, http.StatusBadRequest, errors.New("could not decode base64 encoded data from payload"))
@@ -894,18 +896,33 @@ func (s *server) SendAudio() http.HandlerFunc {
 				}
 			}
 		} else {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("audio data should start with \"data:audio/ogg;base64,\""))
+			s.Respond(w, r, http.StatusBadRequest, errors.New("audio data should start with \"data:audio/\""))
 			return
 		}
 
+		// Configure PTT (Push to Talk) - default is true for voice messages
 		ptt := true
-		mime := "audio/ogg; codecs=opus"
+		if t.PTT != nil {
+			ptt = *t.PTT
+		}
+
+		// Configure MIME type
+		var mime string
+		if t.MimeType != "" {
+			mime = t.MimeType
+		} else {
+			// Default MIME types based on PTT setting
+			if ptt {
+				mime = "audio/ogg; codecs=opus"
+			} else {
+				mime = "audio/mpeg"
+			}
+		}
 
 		msg := &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
-			URL:        proto.String(uploaded.URL),
-			DirectPath: proto.String(uploaded.DirectPath),
-			MediaKey:   uploaded.MediaKey,
-			//Mimetype:      proto.String(http.DetectContentType(filedata)),
+			URL:           proto.String(uploaded.URL),
+			DirectPath:    proto.String(uploaded.DirectPath),
+			MediaKey:      uploaded.MediaKey,
 			Mimetype:      &mime,
 			FileEncSHA256: uploaded.FileEncSHA256,
 			FileSHA256:    uploaded.FileSHA256,
