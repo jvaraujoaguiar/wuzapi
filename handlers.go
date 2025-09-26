@@ -2353,8 +2353,9 @@ func (s *server) SendPoll() http.HandlerFunc {
 func (s *server) DeleteMessage() http.HandlerFunc {
 
 	type textStruct struct {
-		Phone string
-		Id    string
+		Phone  string  // Chat JID (onde deletar a mensagem)
+		Id     string  // Message ID
+		Sender *string `json:"Sender,omitempty"` // JID de quem enviou a mensagem (opcional)
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -2367,6 +2368,7 @@ func (s *server) DeleteMessage() http.HandlerFunc {
 		}
 
 		msgid := ""
+
 		var resp whatsmeow.SendResponse
 
 		decoder := json.NewDecoder(r.Body)
@@ -2395,7 +2397,27 @@ func (s *server) DeleteMessage() http.HandlerFunc {
 			return
 		}
 
-		resp, err = clientManager.GetWhatsmeowClient(txtid).SendMessage(context.Background(), recipient, clientManager.GetWhatsmeowClient(txtid).BuildRevoke(recipient, types.EmptyJID, msgid))
+		// Determine sender JID
+		var senderJID types.JID
+		if t.Sender != nil && *t.Sender != "" {
+			// Use provided sender JID
+			var senderOk bool
+			senderJID, senderOk = parseJID(*t.Sender)
+			if !senderOk {
+				s.Respond(w, r, http.StatusBadRequest, errors.New("could not parse sender Phone"))
+				return
+			}
+		} else {
+			// Default: delete for me only (use current user's JID)
+			myJID := clientManager.GetWhatsmeowClient(txtid).Store.ID
+			if myJID != nil {
+				senderJID = *myJID
+			} else {
+				senderJID = types.EmptyJID
+			}
+		}
+
+		resp, err = clientManager.GetWhatsmeowClient(txtid).SendMessage(context.Background(), recipient, clientManager.GetWhatsmeowClient(txtid).BuildRevoke(recipient, senderJID, msgid))
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("error sending message: %v", err)))
 			return
