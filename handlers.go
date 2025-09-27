@@ -1555,9 +1555,17 @@ func (s *server) SendLocation() http.HandlerFunc {
 }
 
 // ButtonParams defines the structure for interactive message buttons
+// Supports both formats: original (title, description, header, id) and new (displayText, buttonID)
 type ButtonParams struct {
-	DisplayText string `json:"displayText"`
-	ID          string `json:"buttonID"`
+	// Original format
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Header      string `json:"header,omitempty"`
+	ID          string `json:"id,omitempty"`
+	
+	// New format (backward compatibility)
+	DisplayText string `json:"displayText,omitempty"`
+	ButtonID    string `json:"buttonID,omitempty"`
 }
 
 // GenerateMultipleMenuMessage creates an interactive message with multiple menus
@@ -1565,13 +1573,13 @@ func GenerateMultipleMenuMessage(messageText, title, footer string, menus []Menu
 	// Create MessageVersion
 	msgVersion := int32(1)
 
-	// Create multiple buttons, one for each menu
+	// Create multiple buttons, one for each menu (separate lists)
 	var nativeFlowButtons []*waE2E.InteractiveMessage_NativeFlowMessage_NativeFlowButton
 
 	for _, menu := range menus {
 		// Create menu structure for this specific menu
 		menuStructure := map[string]interface{}{
-			"title": menu.Title, // Use the menu's own title
+			"title": menu.Title,
 			"sections": []map[string]interface{}{
 				{
 					"title": menu.Title,
@@ -1580,36 +1588,112 @@ func GenerateMultipleMenuMessage(messageText, title, footer string, menus []Menu
 			},
 		}
 
-		// Convert buttons to menu rows for this menu
-		for _, button := range menu.Buttons {
-			// Extract description from displayText if it contains parentheses
-			description := ""
-			buttonTitle := button.DisplayText
-			if len(button.DisplayText) > 0 {
-				if start := strings.Index(button.DisplayText, "("); start != -1 {
-					if end := strings.Index(button.DisplayText, ")"); end != -1 && end > start {
-						description = button.DisplayText[start+1 : end]
-						buttonTitle = strings.TrimSpace(button.DisplayText[:start])
+		// Determine which format is being used and log for debug
+		if len(menu.Sections) > 0 {
+			// Original format with sections
+			log.Info().
+				Str("menuTitle", menu.Title).
+				Int("sectionsCount", len(menu.Sections)).
+				Interface("sections", menu.Sections).
+				Msg("Processing menu with sections (original format)")
+			
+			// Use first section or create a combined section
+			for sectionIndex, section := range menu.Sections {
+				// For multiple sections, we'll use the first one or combine them
+				if sectionIndex == 0 {
+					menuStructure["sections"].([]map[string]interface{})[0]["title"] = section.Title
+				}
+				
+				// Process all rows from this section
+				for _, row := range section.Rows {
+					menuRow := map[string]interface{}{
+						"title":       row.Title,
+						"description": row.Description,
+						"header":      row.Header,
+						"id":          row.ID,
 					}
+					menuStructure["sections"].([]map[string]interface{})[0]["rows"] = append(
+						menuStructure["sections"].([]map[string]interface{})[0]["rows"].([]map[string]interface{}),
+						menuRow,
+					)
+					log.Info().Interface("row", menuRow).Msg("Added row from section to menu structure")
 				}
 			}
+		} else if len(menu.Buttons) > 0 {
+			// Backward compatibility with buttons format
+			log.Info().
+				Str("menuTitle", menu.Title).
+				Int("buttonCount", len(menu.Buttons)).
+				Interface("buttons", menu.Buttons).
+				Msg("Processing menu buttons (compatibility format)")
 
-			row := map[string]interface{}{
-				"title":       buttonTitle,
-				"description": description,
-				"header":      "",
-				"id":          button.ID,
+			// Convert buttons to menu rows for this menu
+			for i, button := range menu.Buttons {
+				// Determine which format is being used
+				var title, description, header, id string
+				
+				log.Info().
+					Str("menuTitle", menu.Title).
+					Int("buttonIndex", i).
+					Interface("button", button).
+					Msg("Processing individual button")
+				
+				if button.Title != "" || button.Description != "" || button.ID != "" {
+					// Original format (title, description, header, id)
+					title = button.Title
+					description = button.Description
+					header = button.Header
+					id = button.ID
+					log.Info().Str("format", "original").Str("title", title).Str("id", id).Msg("Using original format")
+				} else if button.DisplayText != "" || button.ButtonID != "" {
+					// New format (displayText, buttonID) - extract description from displayText
+					title = button.DisplayText
+					description = ""
+					header = ""
+					id = button.ButtonID
+					
+					// Extract description from displayText if it contains parentheses
+					if len(button.DisplayText) > 0 {
+						if start := strings.Index(button.DisplayText, "("); start != -1 {
+							if end := strings.Index(button.DisplayText, ")"); end != -1 && end > start {
+								description = button.DisplayText[start+1 : end]
+								title = strings.TrimSpace(button.DisplayText[:start])
+							}
+						}
+					}
+					log.Info().Str("format", "new").Str("title", title).Str("id", id).Msg("Using new format")
+				} else {
+					// Skip empty buttons
+					log.Warn().Interface("button", button).Msg("Skipping empty button")
+					continue
+				}
+
+				row := map[string]interface{}{
+					"title":       title,
+					"description": description,
+					"header":      header,
+					"id":          id,
+				}
+				menuStructure["sections"].([]map[string]interface{})[0]["rows"] = append(
+					menuStructure["sections"].([]map[string]interface{})[0]["rows"].([]map[string]interface{}),
+					row,
+				)
+				log.Info().Interface("row", row).Msg("Added row to menu structure")
 			}
-			menuStructure["sections"].([]map[string]interface{})[0]["rows"] = append(
-				menuStructure["sections"].([]map[string]interface{})[0]["rows"].([]map[string]interface{}),
-				row,
-			)
+		} else {
+			// Empty menu - log warning
+			log.Warn().Str("menuTitle", menu.Title).Msg("Menu has no buttons or sections - skipping")
 		}
 
-		// Convert to JSON
-		menuJSON, _ := json.Marshal(menuStructure)
+		// Convert to JSON and log for debugging
+		menuJSON, err := json.Marshal(menuStructure)
+		if err != nil {
+			log.Error().Err(err).Str("menuTitle", menu.Title).Msg("Error marshaling menu structure")
+		} else {
+			log.Info().Str("menuTitle", menu.Title).Str("menuJSON", string(menuJSON)).Msg("Generated menu structure")
+		}
 
-		// Add button for this menu
+		// Add button for this menu (each menu becomes a separate button/list)
 		nativeFlowButtons = append(nativeFlowButtons, &waE2E.InteractiveMessage_NativeFlowMessage_NativeFlowButton{
 			Name:             proto.String("single_select"),
 			ButtonParamsJSON: proto.String(string(menuJSON)),
@@ -1667,24 +1751,41 @@ func GenerateInteractiveMessage(messageText, title, footer string, buttons []But
 
 	// Convert buttons to menu rows with description and header fields
 	for _, button := range buttons {
-		// Extract description from displayText if it contains parentheses
-		description := ""
-		title := button.DisplayText
-		if len(button.DisplayText) > 0 {
-			// Try to extract description from format like "♈️Áries (21/03 - 20/04)"
-			if start := strings.Index(button.DisplayText, "("); start != -1 {
-				if end := strings.Index(button.DisplayText, ")"); end != -1 && end > start {
-					description = button.DisplayText[start+1 : end]
-					title = strings.TrimSpace(button.DisplayText[:start])
+		// Determine which format is being used
+		var title, description, header, id string
+		
+		if button.Title != "" || button.Description != "" || button.ID != "" {
+			// Original format (title, description, header, id)
+			title = button.Title
+			description = button.Description
+			header = button.Header
+			id = button.ID
+		} else if button.DisplayText != "" || button.ButtonID != "" {
+			// New format (displayText, buttonID) - extract description from displayText
+			title = button.DisplayText
+			description = ""
+			header = ""
+			id = button.ButtonID
+			
+			// Extract description from displayText if it contains parentheses
+			if len(button.DisplayText) > 0 {
+				if start := strings.Index(button.DisplayText, "("); start != -1 {
+					if end := strings.Index(button.DisplayText, ")"); end != -1 && end > start {
+						description = button.DisplayText[start+1 : end]
+						title = strings.TrimSpace(button.DisplayText[:start])
+					}
 				}
 			}
+		} else {
+			// Skip empty buttons
+			continue
 		}
 
 		row := map[string]interface{}{
 			"title":       title,
 			"description": description,
-			"header":      "",
-			"id":          button.ID,
+			"header":      header,
+			"id":          id,
 		}
 		menuStructure["sections"].([]map[string]interface{})[0]["rows"] = append(
 			menuStructure["sections"].([]map[string]interface{})[0]["rows"].([]map[string]interface{}),
@@ -1692,8 +1793,13 @@ func GenerateInteractiveMessage(messageText, title, footer string, buttons []But
 		)
 	}
 
-	// Convert to JSON
-	menuJSON, _ := json.Marshal(menuStructure)
+	// Convert to JSON and log for debugging
+	menuJSON, err := json.Marshal(menuStructure)
+	if err != nil {
+		log.Error().Err(err).Msg("Error marshaling single menu structure")
+	} else {
+		log.Info().Str("singleMenuJSON", string(menuJSON)).Msg("Generated single menu structure")
+	}
 
 	// Create MessageVersion
 	msgVersion := int32(1)
@@ -1960,10 +2066,12 @@ type BinaryNode struct {
 	Content []BinaryNode      `json:"content,omitempty"`
 }
 
-// MenuParams defines the structure for a menu with buttons
+// MenuParams defines the structure for a menu with buttons or sections
+// Supports both formats: buttons (backward compatibility) and sections (original format)
 type MenuParams struct {
-	Title   string         `json:"title"`
-	Buttons []ButtonParams `json:"buttons"`
+	Title    string         `json:"title"`
+	Buttons  []ButtonParams `json:"buttons,omitempty"`  // New format (backward compatibility)
+	Sections []ListSection `json:"sections,omitempty"` // Original format
 }
 
 // ListRow represents a row in a list section
@@ -2085,7 +2193,8 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 		}
 
 		// Log the message structure for debugging
-		log.Info().Str("msgid", msgid).Str("recipient", recipient.String()).Msg("Attempting to send interactive message")
+		payloadJSON, _ := json.Marshal(payload)
+		log.Info().Str("msgid", msgid).Str("recipient", recipient.String()).Str("payload", string(payloadJSON)).Msg("Attempting to send interactive message")
 
 		// Convert JSON nodes to waBinary.Node format
 		var additionalNodes []waBinary.Node
