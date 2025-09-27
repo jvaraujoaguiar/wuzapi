@@ -1562,7 +1562,7 @@ type ButtonParams struct {
 	Description string `json:"description,omitempty"`
 	Header      string `json:"header,omitempty"`
 	ID          string `json:"id,omitempty"`
-	
+
 	// New format (backward compatibility)
 	DisplayText string `json:"displayText,omitempty"`
 	ButtonID    string `json:"buttonID,omitempty"`
@@ -1596,14 +1596,14 @@ func GenerateMultipleMenuMessage(messageText, title, footer string, menus []Menu
 				Int("sectionsCount", len(menu.Sections)).
 				Interface("sections", menu.Sections).
 				Msg("Processing menu with sections (original format)")
-			
+
 			// Use first section or create a combined section
 			for sectionIndex, section := range menu.Sections {
 				// For multiple sections, we'll use the first one or combine them
 				if sectionIndex == 0 {
 					menuStructure["sections"].([]map[string]interface{})[0]["title"] = section.Title
 				}
-				
+
 				// Process all rows from this section
 				for _, row := range section.Rows {
 					menuRow := map[string]interface{}{
@@ -1631,13 +1631,13 @@ func GenerateMultipleMenuMessage(messageText, title, footer string, menus []Menu
 			for i, button := range menu.Buttons {
 				// Determine which format is being used
 				var title, description, header, id string
-				
+
 				log.Info().
 					Str("menuTitle", menu.Title).
 					Int("buttonIndex", i).
 					Interface("button", button).
 					Msg("Processing individual button")
-				
+
 				if button.Title != "" || button.Description != "" || button.ID != "" {
 					// Original format (title, description, header, id)
 					title = button.Title
@@ -1651,7 +1651,7 @@ func GenerateMultipleMenuMessage(messageText, title, footer string, menus []Menu
 					description = ""
 					header = ""
 					id = button.ButtonID
-					
+
 					// Extract description from displayText if it contains parentheses
 					if len(button.DisplayText) > 0 {
 						if start := strings.Index(button.DisplayText, "("); start != -1 {
@@ -1753,7 +1753,7 @@ func GenerateInteractiveMessage(messageText, title, footer string, buttons []But
 	for _, button := range buttons {
 		// Determine which format is being used
 		var title, description, header, id string
-		
+
 		if button.Title != "" || button.Description != "" || button.ID != "" {
 			// Original format (title, description, header, id)
 			title = button.Title
@@ -1766,7 +1766,7 @@ func GenerateInteractiveMessage(messageText, title, footer string, buttons []But
 			description = ""
 			header = ""
 			id = button.ButtonID
-			
+
 			// Extract description from displayText if it contains parentheses
 			if len(button.DisplayText) > 0 {
 				if start := strings.Index(button.DisplayText, "("); start != -1 {
@@ -2071,7 +2071,7 @@ type BinaryNode struct {
 type MenuParams struct {
 	Title    string         `json:"title"`
 	Buttons  []ButtonParams `json:"buttons,omitempty"`  // New format (backward compatibility)
-	Sections []ListSection `json:"sections,omitempty"` // Original format
+	Sections []ListSection  `json:"sections,omitempty"` // Original format
 }
 
 // ListRow represents a row in a list section
