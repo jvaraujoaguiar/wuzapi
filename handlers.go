@@ -1737,6 +1737,86 @@ func GenerateInteractiveMessage(messageText, title, footer string, buttons []But
 	return InteractiveMessage
 }
 
+// GenerateInteractiveListMessage creates an interactive message with a list containing multiple sections
+func GenerateInteractiveListMessage(messageText, title, footer string, listMenu *ListMenuStructure) *waE2E.InteractiveMessage {
+	// Create the menu structure with multiple sections like the user requested
+	menuStructure := map[string]interface{}{
+		"title":    listMenu.Title,
+		"sections": make([]map[string]interface{}, 0),
+	}
+
+	// Convert each section with its rows
+	for _, section := range listMenu.Sections {
+		sectionData := map[string]interface{}{
+			"title": section.Title,
+			"rows":  make([]map[string]interface{}, 0),
+		}
+
+		// Convert rows for this section
+		for _, row := range section.Rows {
+			rowData := map[string]interface{}{
+				"title":       row.Title,
+				"description": row.Description,
+				"header":      row.Header,
+				"id":          row.ID,
+			}
+			sectionData["rows"] = append(
+				sectionData["rows"].([]map[string]interface{}),
+				rowData,
+			)
+		}
+
+		menuStructure["sections"] = append(
+			menuStructure["sections"].([]map[string]interface{}),
+			sectionData,
+		)
+	}
+
+	// Convert to JSON
+	menuJSON, _ := json.Marshal(menuStructure)
+
+	// Create MessageVersion
+	msgVersion := int32(1)
+
+	// Create single button with "single_select" name as in Baileys
+	nativeFlowButtons := []*waE2E.InteractiveMessage_NativeFlowMessage_NativeFlowButton{
+		{
+			Name:             proto.String("single_select"),
+			ButtonParamsJSON: proto.String(string(menuJSON)),
+		},
+	}
+
+	// Create the interactive message
+	InteractiveMessage := &waE2E.InteractiveMessage{
+		Body: &waE2E.InteractiveMessage_Body{
+			Text: proto.String(messageText),
+		},
+		InteractiveMessage: &waE2E.InteractiveMessage_NativeFlowMessage_{
+			NativeFlowMessage: &waE2E.InteractiveMessage_NativeFlowMessage{
+				MessageVersion: &msgVersion,
+				Buttons:        nativeFlowButtons,
+			},
+		},
+	}
+
+	// Add header if title is provided
+	if title != "" {
+		InteractiveMessage.Header = &waE2E.InteractiveMessage_Header{
+			Title:              proto.String(title),
+			HasMediaAttachment: proto.Bool(false),
+		}
+	}
+
+	// Add footer if provided
+	if footer != "" {
+		InteractiveMessage.Footer = &waE2E.InteractiveMessage_Footer{
+			Text: proto.String(footer),
+		}
+	}
+
+	return InteractiveMessage
+}
+
 // Sends Buttons (not implemented, does not work)
 func (s *server) SendButtons() http.HandlerFunc {
 
@@ -1886,17 +1966,38 @@ type MenuParams struct {
 	Buttons []ButtonParams `json:"buttons"`
 }
 
+// ListRow represents a row in a list section
+type ListRow struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Header      string `json:"header,omitempty"`
+	ID          string `json:"id"`
+}
+
+// ListSection represents a section in a list
+type ListSection struct {
+	Title string    `json:"title"`
+	Rows  []ListRow `json:"rows"`
+}
+
+// ListMenuStructure represents the complete list structure
+type ListMenuStructure struct {
+	Title    string        `json:"title"`
+	Sections []ListSection `json:"sections"`
+}
+
 // SendInteractiveMessage sends interactive messages with buttons
 func (s *server) SendInteractiveMessage() http.HandlerFunc {
 	type interactiveMessageStruct struct {
-		Phone           string         `json:"phone"`
-		Message         string         `json:"message"`
-		Title           string         `json:"title,omitempty"`
-		Footer          string         `json:"footer,omitempty"`
-		Buttons         []ButtonParams `json:"buttons,omitempty"` // Single menu (backward compatibility)
-		Menus           []MenuParams   `json:"menus,omitempty"`   // Multiple menus
-		ID              string         `json:"id,omitempty"`
-		AdditionalNodes []BinaryNode   `json:"additionalNodes,omitempty"`
+		Phone           string             `json:"phone"`
+		Message         string             `json:"message"`
+		Title           string             `json:"title,omitempty"`
+		Footer          string             `json:"footer,omitempty"`
+		Buttons         []ButtonParams     `json:"buttons,omitempty"`  // Single menu (backward compatibility)
+		Menus           []MenuParams       `json:"menus,omitempty"`    // Multiple menus
+		ListMenu        *ListMenuStructure `json:"listMenu,omitempty"` // List with sections
+		ID              string             `json:"id,omitempty"`
+		AdditionalNodes []BinaryNode       `json:"additionalNodes,omitempty"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1926,15 +2027,30 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 			return
 		}
 
-		// Validate that either Buttons or Menus is provided
-		if len(payload.Buttons) == 0 && len(payload.Menus) == 0 {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("missing buttons or menus in payload"))
+		// Validate that either Buttons, Menus, or ListMenu is provided
+		hasButtons := len(payload.Buttons) > 0
+		hasMenus := len(payload.Menus) > 0
+		hasListMenu := payload.ListMenu != nil
+
+		if !hasButtons && !hasMenus && !hasListMenu {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("missing buttons, menus, or listMenu in payload"))
 			return
 		}
 
-		// Don't allow both Buttons and Menus at the same time to avoid confusion
-		if len(payload.Buttons) > 0 && len(payload.Menus) > 0 {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("use either buttons or menus, not both"))
+		// Don't allow multiple types at the same time to avoid confusion
+		activeCount := 0
+		if hasButtons {
+			activeCount++
+		}
+		if hasMenus {
+			activeCount++
+		}
+		if hasListMenu {
+			activeCount++
+		}
+
+		if activeCount > 1 {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("use only one of: buttons, menus, or listMenu"))
 			return
 		}
 
@@ -1952,7 +2068,10 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 		var interactiveMsg *waE2E.InteractiveMessage
 
 		// Generate different message types based on input
-		if len(payload.Menus) > 0 {
+		if payload.ListMenu != nil {
+			// List with sections mode
+			interactiveMsg = GenerateInteractiveListMessage(payload.Message, payload.Title, payload.Footer, payload.ListMenu)
+		} else if len(payload.Menus) > 0 {
 			// Multiple menus mode
 			interactiveMsg = GenerateMultipleMenuMessage(payload.Message, payload.Title, payload.Footer, payload.Menus)
 		} else {
@@ -1975,32 +2094,7 @@ func (s *server) SendInteractiveMessage() http.HandlerFunc {
 			// Use nodes from request
 			additionalNodes = convertJSONNodesToBinary(payload.AdditionalNodes)
 		} else {
-			// Use default nodes for interactive message support
-			// Based on whatsmeow business profile pattern and Baileys implementation
-			// additionalNodes = []waBinary.Node{
-			// 	{
-			// 		Tag:   "biz",
-			// 		Attrs: waBinary.Attrs{},
-			// 		Content: []waBinary.Node{
-			// 			{
-			// 				Tag: "interactive",
-			// 				Attrs: waBinary.Attrs{
-			// 					"type": "native_flow",
-			// 					"v":    "1",
-			// 				},
-			// 				Content: []waBinary.Node{
-			// 					{
-			// 						Tag: "native_flow",
-			// 						Attrs: waBinary.Attrs{
-			// 							"name": "mixed",
-			// 							"v":    "2",
-			// 						},
-			// 					},
-			// 				},
-			// 			},
-			// 		},
-			// 	},
-			// }
+
 		}
 
 		// Send the message with additional nodes
