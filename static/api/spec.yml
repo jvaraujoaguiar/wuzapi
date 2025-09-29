@@ -145,7 +145,7 @@ paths:
         * Message
         * ReadReceipt
         * Presence
-        * HistorySync
+        * HistorySync (automatically disabled when "All" is selected)
         * ChatPresence
         * All (subscribes to all event types)
       security:
@@ -172,7 +172,7 @@ paths:
         * Message
         * ReadReceipt
         * Presence
-        * HistorySync
+        * HistorySync (automatically disabled when "All" is selected)
         * ChatPresence
         * All (subscribes to all event types)
       security:
@@ -218,7 +218,7 @@ paths:
         * Message
         * ReadReceipt
         * Presence
-        * HistorySync
+        * HistorySync (automatically disabled when "All" is selected)
         * ChatPresence
         * All (subscribes to all event types)
       security:
@@ -241,7 +241,7 @@ paths:
       tags:
         - Session 
       summary: connects to WhatsApp servers
-      description: "Initiates connection to WhatsApp servers.\n\nIf there is no previous session created, it will generate a QR code that can be retrieved via the [qr](#/Session/get_session_qr) API call.\n\nIf the optional Subscribe is supplied it will limit webhooks to the specified event types: Message,ReadReceipt,Presence,HistorySync,ChatPresence.\n\nIf no Subscribe is supplied it will subscribe to All events.\n\nIf Immediate is set to false, the action will wait for 10 seconds to retrieve actual connection status from whatsapp, otherwise it will return immediatly.\n\nWhen setting Immediate to true you should check for actual connection status after a few seconds via the [status](#/Session/get_session_status) API call as your connection might fail if the session was closed from another device."
+      description: "Initiates connection to WhatsApp servers.\n\nIf there is no previous session created, it will generate a QR code that can be retrieved via the [qr](#/Session/get_session_qr) API call.\n\nIf the optional Subscribe is supplied it will limit webhooks to the specified event types: Message,ReadReceipt,Presence,HistorySync,ChatPresence.\n\nNote: HistorySync events are automatically disabled when 'All' is selected to prevent webhook overload.\n\nIf no Subscribe is supplied it will subscribe to All events.\n\nIf Immediate is set to false, the action will wait for 10 seconds to retrieve actual connection status from whatsapp, otherwise it will return immediatly.\n\nWhen setting Immediate to true you should check for actual connection status after a few seconds via the [status](#/Session/get_session_status) API call as your connection might fail if the session was closed from another device."
       security:
         - ApiKeyAuth: []
       requestBody:

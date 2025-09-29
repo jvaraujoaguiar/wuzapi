@@ -149,7 +149,7 @@ The JSON body for creating a new user must contain:
 - `name` [string] : User's name 
 - `token` [string] : Security token to authorize/authenticate this user
 - `webhook` [string] : URL to send events via POST (optional)
-- `events` [string] : Comma-separated list of events to receive (required) - Valid events are: "Message", "ReadReceipt", "Presence", "HistorySync", "ChatPresence", "All"
+- `events` [string] : Comma-separated list of events to receive (required) - Valid events are: "Message", "ReadReceipt", "Presence", "HistorySync", "ChatPresence", "All" (Note: HistorySync is automatically disabled when "All" is selected)
 - `expiration` [int] : Expiration timestamp (optional, not enforced by the system)
 
 ## User Creation with Optional Proxy and S3 Configuration

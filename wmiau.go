@@ -215,6 +215,16 @@ func sendEventWithWebHook(mycli *MyClient, postmap map[string]interface{}, path 
 }
 
 func checkIfSubscribedToEvent(subscribedEvents []string, eventType string, userId string) bool {
+	// Special case: HistorySync is excluded when "All" is selected
+	if eventType == "HistorySync" && Find(subscribedEvents, "All") && !Find(subscribedEvents, "HistorySync") {
+		log.Warn().
+			Str("type", eventType).
+			Strs("subscribedEvents", subscribedEvents).
+			Str("userID", userId).
+			Msg("Skipping HistorySync webhook. HistorySync is disabled when 'All' is selected")
+		return false
+	}
+	
 	if !Find(subscribedEvents, eventType) && !Find(subscribedEvents, "All") {
 		log.Warn().
 			Str("type", eventType).

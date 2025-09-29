@@ -365,7 +365,7 @@
                         <tr>
                             <td>Subscribe</td>
                             <td>Array[string]</td>
-                            <td>Lista de tipos de eventos para inscrição. Valores possíveis: "Message", "ReadReceipt", "Presence", "HistorySync", "ChatPresence", "All"</td>
+                            <td>Lista de tipos de eventos para inscrição. Valores possíveis: "Message", "ReadReceipt", "Presence", "HistorySync", "ChatPresence", "All". <strong>Nota:</strong> O evento "HistorySync" é automaticamente desabilitado quando "All" é selecionado para evitar sobrecarga de webhooks.</td>
                         </tr>
                         <tr>
                             <td>Immediate</td>
@@ -645,7 +645,7 @@
                     <ul>
                         <li><code>AppState</code> - Estado da aplicação</li>
                         <li><code>AppStateSyncComplete</code> - Sincronização completa</li>
-                        <li><code>HistorySync</code> - Sincronização de histórico</li>
+                        <li><code>HistorySync</code> - Sincronização de histórico (⚠️ <strong>Desabilitado automaticamente quando "All" é selecionado</strong>)</li>
                         <li><code>OfflineSyncCompleted</code> - Sincronização offline completa</li>
                         <li><code>OfflineSyncPreview</code> - Preview de sincronização offline</li>
                     </ul>
