@@ -224,7 +224,7 @@ func checkIfSubscribedToEvent(subscribedEvents []string, eventType string, userI
 			Msg("Skipping HistorySync webhook. HistorySync is disabled when 'All' is selected")
 		return false
 	}
-	
+
 	if !Find(subscribedEvents, eventType) && !Find(subscribedEvents, "All") {
 		log.Warn().
 			Str("type", eventType).
