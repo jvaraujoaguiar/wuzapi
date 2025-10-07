@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -695,133 +696,121 @@ func (s *server) GetStatus() http.HandlerFunc {
 
 // Sends a document/attachment message
 func (s *server) SendDocument() http.HandlerFunc {
-
-	type documentStruct struct {
-		Caption     string
-		Phone       string
-		Document    string
-		FileName    string
-		Id          string
-		MimeType    string
-		ContextInfo waE2E.ContextInfo
-	}
-
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Safe type assertion
+		userInfo, ok := r.Context().Value("userinfo").(Values)
+		if !ok {
+			s.Respond(w, r, http.StatusUnauthorized, errors.New("invalid user info"))
+			return
+		}
 
-		txtid := r.Context().Value("userinfo").(Values).Get("Id")
-		msgid := ""
-		var resp whatsmeow.SendResponse
-
-		if clientManager.GetWhatsmeowClient(txtid) == nil {
+		txtid := userInfo.Get("Id")
+		client := clientManager.GetWhatsmeowClient(txtid)
+		if client == nil {
 			s.Respond(w, r, http.StatusInternalServerError, errors.New("no session"))
 			return
 		}
 
-		decoder := json.NewDecoder(r.Body)
-		var t documentStruct
-		var err error
-		err = decoder.Decode(&t)
+		// Parse multipart form
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			s.Respond(w, r, http.StatusBadRequest, fmt.Errorf("could not parse multipart form: %w", err))
+			return
+		}
+
+		// Get and validate required fields
+		phone := r.FormValue("Phone")
+		fileName := r.FormValue("FileName")
+
+		if phone == "" || fileName == "" {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("missing required fields: Phone and FileName"))
+			return
+		}
+
+		caption := r.FormValue("Caption")
+		mimeType := r.FormValue("MimeType")
+		msgid := r.FormValue("Id")
+
+		if msgid == "" {
+			msgid = client.GenerateMessageID()
+		}
+
+		recipient, err := validateMessageFields(phone, nil, nil)
 		if err != nil {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("could not decode Payload"))
-			return
-		}
-
-		if t.Phone == "" {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("missing Phone in Payload"))
-			return
-		}
-
-		if t.Document == "" {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("missing Document in Payload"))
-			return
-		}
-
-		if t.FileName == "" {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("missing FileName in Payload"))
-			return
-		}
-
-		recipient, err := validateMessageFields(t.Phone, t.ContextInfo.StanzaID, t.ContextInfo.Participant)
-		if err != nil {
-			log.Error().Msg(fmt.Sprintf("%s", err))
+			log.Error().Err(err).Msg("validation failed")
 			s.Respond(w, r, http.StatusBadRequest, err)
 			return
 		}
 
-		if t.Id == "" {
-			msgid = clientManager.GetWhatsmeowClient(txtid).GenerateMessageID()
-		} else {
-			msgid = t.Id
-		}
-
-		var uploaded whatsmeow.UploadResponse
-		var filedata []byte
-
-		if t.Document[0:29] == "data:application/octet-stream" {
-			var dataURL, err = dataurl.DecodeString(t.Document)
-			if err != nil {
-				s.Respond(w, r, http.StatusBadRequest, errors.New("could not decode base64 encoded data from payload"))
-				return
-			} else {
-				filedata = dataURL.Data
-				uploaded, err = clientManager.GetWhatsmeowClient(txtid).Upload(context.Background(), filedata, whatsmeow.MediaDocument)
-				if err != nil {
-					s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("failed to upload file: %v", err)))
-					return
-				}
-			}
-		} else {
-			s.Respond(w, r, http.StatusBadRequest, errors.New("document data should start with \"data:application/octet-stream;base64,\""))
-			return
-		}
-
-		msg := &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
-			URL:        proto.String(uploaded.URL),
-			FileName:   &t.FileName,
-			DirectPath: proto.String(uploaded.DirectPath),
-			MediaKey:   uploaded.MediaKey,
-			Mimetype: proto.String(func() string {
-				if t.MimeType != "" {
-					return t.MimeType
-				}
-				return http.DetectContentType(filedata)
-			}()),
-			FileEncSHA256: uploaded.FileEncSHA256,
-			FileSHA256:    uploaded.FileSHA256,
-			FileLength:    proto.Uint64(uint64(len(filedata))),
-			Caption:       proto.String(t.Caption),
-		}}
-
-		if t.ContextInfo.StanzaID != nil {
-			msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{
-				StanzaID:      proto.String(*t.ContextInfo.StanzaID),
-				Participant:   proto.String(*t.ContextInfo.Participant),
-				QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
-			}
-		}
-		if t.ContextInfo.MentionedJID != nil {
-			if msg.ExtendedTextMessage.ContextInfo == nil {
-				msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{}
-			}
-			msg.ExtendedTextMessage.ContextInfo.MentionedJID = t.ContextInfo.MentionedJID
-		}
-
-		resp, err = clientManager.GetWhatsmeowClient(txtid).SendMessage(context.Background(), recipient, msg, whatsmeow.SendRequestExtra{ID: msgid})
+		// Get and validate file
+		file, handler, err := r.FormFile("Document")
 		if err != nil {
-			s.Respond(w, r, http.StatusInternalServerError, errors.New(fmt.Sprintf("Error sending message: %v", err)))
+			s.Respond(w, r, http.StatusBadRequest, errors.New("missing Document in form data"))
+			return
+		}
+		defer file.Close()
+
+		const maxFileSize = 200 * 1024 * 1024
+		if handler.Size > maxFileSize {
+			s.Respond(w, r, http.StatusBadRequest, errors.New("file too large, maximum size is 200MB"))
 			return
 		}
 
-		log.Info().Str("timestamp", fmt.Sprintf("%v", resp.Timestamp)).Str("id", msgid).Msg("Message sent")
-		response := map[string]interface{}{"Details": "Sent", "Timestamp": resp.Timestamp.Unix(), "Id": msgid}
+		// Read file data
+		fileData, err := io.ReadAll(file)
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, fmt.Errorf("failed to read file: %w", err))
+			return
+		}
+
+		if mimeType == "" {
+			mimeType = http.DetectContentType(fileData)
+		}
+
+		// Upload file
+		uploaded, err := client.Upload(context.Background(), fileData, whatsmeow.MediaDocument)
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, fmt.Errorf("failed to upload file: %w", err))
+			return
+		}
+
+		// Build and send message
+		msg := &waE2E.Message{
+			DocumentMessage: &waE2E.DocumentMessage{
+				URL:           proto.String(uploaded.URL),
+				FileName:      &fileName,
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String(mimeType),
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(handler.Size)),
+				Caption:       proto.String(caption),
+			},
+		}
+
+		resp, err := client.SendMessage(context.Background(), recipient, msg, whatsmeow.SendRequestExtra{ID: msgid})
+		if err != nil {
+			s.Respond(w, r, http.StatusInternalServerError, fmt.Errorf("error sending message: %w", err))
+			return
+		}
+
+		log.Info().Str("timestamp", fmt.Sprintf("%v", resp.Timestamp)).Str("id", msgid).Msg("message sent")
+
+		response := map[string]interface{}{
+			"Details":   "Sent",
+			"Timestamp": resp.Timestamp.Unix(),
+			"Id":        msgid,
+		}
+
 		responseJson, err := json.Marshal(response)
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, err)
-		} else {
-			s.Respond(w, r, http.StatusOK, string(responseJson))
+			return
 		}
-		return
+
+		s.Respond(w, r, http.StatusOK, string(responseJson))
 	}
+
 }
 
 // Sends an audio message
@@ -900,8 +889,8 @@ func (s *server) SendAudio() http.HandlerFunc {
 			return
 		}
 
-		// Configure PTT (Push to Talk) - default is true for voice messages
-		ptt := true
+		// Configure PTT (Push to Talk) - default is false for voice messages
+		ptt := false
 		if t.PTT != nil {
 			ptt = *t.PTT
 		}
