@@ -1,5 +1,10 @@
 FROM golang:1.23-bullseye AS builder
 
+# Configurar proxy do Go para evitar problemas de rede
+ENV GOPROXY=https://proxy.golang.org,direct
+ENV GOSUMDB=sum.golang.org
+ENV CGO_ENABLED=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && apt-get clean \
@@ -10,15 +15,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     pkg-config \
+    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
 COPY go.mod go.sum ./
-RUN go mod download
+
+# Download com retry e verificação
+RUN go mod download && go mod verify
 
 COPY . .
-ENV CGO_ENABLED=1
+
 RUN go build -o wuzapi
 
 FROM debian:bullseye-slim
@@ -40,6 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ENV TZ="America/Sao_Paulo"
+
 WORKDIR /app
 
 COPY --from=builder /app/wuzapi         /app/
