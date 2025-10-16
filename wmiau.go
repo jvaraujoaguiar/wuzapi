@@ -1184,14 +1184,10 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 	case *events.GroupInfo:
 		postmap["type"] = "GroupInfo"
 		dowebhook = 1
-		// Add session info
-		mycli.addSessionInfo(postmap)
 		log.Info().Str("group", evt.JID.String()).Msg("Group info changed")
 	case *events.JoinedGroup:
 		postmap["type"] = "JoinedGroup"
 		dowebhook = 1
-		// Add session info
-		mycli.addSessionInfo(postmap)
 		log.Info().Str("group", evt.JID.String()).Msg("Joined group")
 	default:
 		log.Warn().Str("event", fmt.Sprintf("%+v", evt)).Msg("Unhandled event")
